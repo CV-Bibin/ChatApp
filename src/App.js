@@ -56,7 +56,7 @@ function App() {
 
   // 2. Main Dashboard
   return (
-   <div className="h-screen w-full bg-[#F3F4F6] p-4 md:p-6 flex gap-4 md:gap-6 overflow-hidden font-sans relative">
+    <div className="h-screen w-full bg-[#F3F4F6] p-4 md:p-6 flex gap-4 md:gap-6 overflow-hidden font-sans relative">
       
       {/* Admin Button (Only visible to Admin) */}
       {userData?.role === 'admin' && (

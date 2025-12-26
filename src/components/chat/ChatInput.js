@@ -173,7 +173,7 @@ export default function ChatInput({
                 placeholder={isUploading ? "Uploading media..." : (editingMessage ? "Update..." : "Type a message...")}
                 value={newMessage}
                 onChange={handleTyping}
-                disabled={isUploading}
+                //disabled={isUploading}
              />
           )}
           
