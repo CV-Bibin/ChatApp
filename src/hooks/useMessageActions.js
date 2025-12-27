@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { database } from '../firebase';
 import { ref, push, set, update, remove } from 'firebase/database';
 import { addXP } from '../utils/xpSystem';
@@ -7,7 +8,6 @@ const UPLOAD_PRESET = "chat_media";
 
 export default function useMessageActions(activeGroup, currentUser, userData) {
 
-  // Helper to safely get text for replies/pinning
   const getMessageSnippet = (msg) => {
     if (msg.text) return msg.text;
     if (msg.type === 'image') return "📷 Image";
@@ -41,7 +41,7 @@ export default function useMessageActions(activeGroup, currentUser, userData) {
     if (replyTo) {
       newMsg.replyTo = {
         id: replyTo.id,
-        text: getMessageSnippet(replyTo), // Safe snippet
+        text: getMessageSnippet(replyTo),
         sender: replyTo.senderEmail.split('@')[0]
       };
     }
@@ -50,102 +50,91 @@ export default function useMessageActions(activeGroup, currentUser, userData) {
     return false;
   };
 
-  const handleFileUpload = async (file) => {
+  // --- FIXED UPLOAD LOGIC ---
+  const handleFileUpload = async (file, category = 'file') => {
     if (!file) return;
 
-    // 1. Create a "Placeholder" message immediately
     const chatRef = ref(database, `groups/${activeGroup.id}/messages`);
     const newMsgRef = push(chatRef);
     
-    // Guess type for icon
-    let tempType = 'file';
-    if (file.type.startsWith('image/')) tempType = 'image';
-    if (file.type.startsWith('video/')) tempType = 'video';
+    let tempType = category;
 
-    const tempMsg = {
+    await set(newMsgRef, {
         type: tempType,
-        isUploading: true, // <--- Flag for UI
+        isUploading: true, 
         fileName: file.name,
+        fileSize: "Uploading...",
         senderId: currentUser.uid,
         senderEmail: currentUser.email,
         senderRole: userData?.role || 'user',
         senderXp: userData?.xp || 0,
         createdAt: Date.now()
-    };
-
-    // Show it in chat immediately
-    await set(newMsgRef, tempMsg);
+    });
 
     try {
-        // 2. Start Upload
         const formData = new FormData();
         formData.append("file", file);
         formData.append("upload_preset", UPLOAD_PRESET); 
-        formData.append("cloud_name", CLOUD_NAME);
-
+        
         const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/auto/upload`, {
-            method: "POST", body: formData
+            method: "POST", 
+            body: formData
         });
+        
         const data = await res.json();
 
-        if (data.secure_url) {
-            // 3. Update placeholder with real data
-            let finalType = 'file';
-            if (data.resource_type === 'image') finalType = 'image';
-            if (data.resource_type === 'video') finalType = 'video';
-            if (file.name.toLowerCase().endsWith('.pdf')) finalType = 'file';
+        if (res.ok && data.secure_url) {
+            let finalType = category; 
+            
+            // Auto-detect PDF sent as image
+            if (category === 'image' && file.name.toLowerCase().endsWith('.pdf')) finalType = 'file';
 
             const fileSize = (file.size / (1024 * 1024));
             const sizeStr = fileSize < 1 ? (file.size / 1024).toFixed(0) + " KB" : fileSize.toFixed(2) + " MB";
 
             await update(newMsgRef, {
                 mediaUrl: data.secure_url,
+                // CRITICAL: Save resource type (raw/image/video) to fix PDF downloads
+                resourceType: data.resource_type || 'auto', 
                 type: finalType,
                 fileSize: sizeStr,
-                isUploading: null // Remove loading flag
+                isUploading: null 
             });
             addXP(currentUser.uid, 5); 
         } else {
-             // Upload failed, remove placeholder
              console.error("Cloudinary Error:", data);
-             alert("Upload failed.");
-             remove(newMsgRef);
+             alert(`Upload Error: ${data.error?.message || "Unknown error"}`);
+             remove(newMsgRef); 
         }
     } catch (error) {
-        console.error("Upload network error:", error);
-        alert("Upload failed.");
+        console.error("Network Error:", error);
+        alert("Network Error: Could not upload file.");
         remove(newMsgRef);
     }
   };
 
+  // ... (keep handleSendAudio, handleCreatePoll, handleForwardAction as is) ...
   const handleSendAudio = (audioBlob) => {
     const reader = new FileReader();
     reader.readAsDataURL(audioBlob);
     reader.onloadend = async () => {
       const chatRef = ref(database, `groups/${activeGroup.id}/messages`);
-      const newMsg = {
-        type: 'audio',
-        audioUrl: reader.result,
-        senderId: currentUser.uid,
-        senderEmail: currentUser.email,
-        senderRole: userData?.role || 'user',
-        senderXp: userData?.xp || 0,
-        createdAt: Date.now()
-      };
-      await set(push(chatRef), newMsg);
+      await set(push(chatRef), {
+        type: 'audio', audioUrl: reader.result,
+        senderId: currentUser.uid, senderEmail: currentUser.email,
+        senderRole: userData?.role || 'user', senderXp: userData?.xp || 0, createdAt: Date.now()
+      });
       addXP(currentUser.uid, 3);
     };
   };
 
   const handleCreatePoll = async (pollData) => {
     const chatRef = ref(database, `groups/${activeGroup.id}/messages`);
-    const newMsg = {
+    await set(push(chatRef), {
       type: 'poll', ...pollData,
       senderId: currentUser.uid, senderEmail: currentUser.email,
-      senderRole: userData?.role || 'user', senderXp: userData?.xp || 0,
-      createdAt: Date.now()
-    };
-    await set(push(chatRef), newMsg);
+      senderRole: userData?.role || 'user', senderXp: userData?.xp || 0, createdAt: Date.now()
+    });
     addXP(currentUser.uid, 2);
   };
 
@@ -154,28 +143,19 @@ export default function useMessageActions(activeGroup, currentUser, userData) {
     for (const groupId of targetGroupIds) {
         const chatRef = ref(database, `groups/${groupId}/messages`);
         const newMsg = {
-            senderId: currentUser.uid,
-            senderEmail: currentUser.email,
-            senderRole: userData?.role || 'user',
-            senderXp: userData?.xp || 0,
-            createdAt: Date.now(),
-            isForwarded: true,
+            senderId: currentUser.uid, senderEmail: currentUser.email,
+            senderRole: userData?.role || 'user', senderXp: userData?.xp || 0,
+            createdAt: Date.now(), isForwarded: true,
+            type: msgToForward.type || 'text',
+            text: msgToForward.text || "",
+            mediaUrl: msgToForward.mediaUrl || null,
+            fileName: msgToForward.fileName || null,
+            fileSize: msgToForward.fileSize || null,
+            audioUrl: msgToForward.audioUrl || null
         };
-        
-        newMsg.type = msgToForward.type || 'text';
         if (msgToForward.type === 'poll') {
             newMsg.question = msgToForward.question;
-            newMsg.isQuiz = msgToForward.isQuiz || false;
-            if(msgToForward.isQuiz) newMsg.correctOptionId = msgToForward.correctOptionId;
             newMsg.options = msgToForward.options.map(opt => ({ id: opt.id, text: opt.text, voteCount: 0 }));
-        } else if (msgToForward.type === 'audio') {
-            newMsg.audioUrl = msgToForward.audioUrl;
-        } else if (['image', 'video', 'file'].includes(msgToForward.type)) {
-            newMsg.mediaUrl = msgToForward.mediaUrl;
-            newMsg.fileName = msgToForward.fileName || "File";
-            newMsg.fileSize = msgToForward.fileSize || "";
-        } else {
-            newMsg.text = msgToForward.text || "";
         }
         await set(push(chatRef), newMsg);
     }

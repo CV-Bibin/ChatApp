@@ -1,32 +1,71 @@
 import React, { useState } from 'react';
-import { Pin, Reply, Smile, Trash2, Edit2, Share, CheckCheck, Download, Eye, Play, FileText, File, Loader2 } from 'lucide-react';
+import { Pin, Reply, Smile, Trash2, Edit2, Share, CheckCheck, Download, Eye, Play, FileText, File, Loader2, Star } from 'lucide-react';
 import PollMessage from './PollMessage';
 import VoiceMessage from './VoiceMessage';
 import AnimeDP from "../images/AnimeDP";
 
 export default function MessageItem({ 
   msg, currentUser, userData, isManager, isFirstLevelRater, groupMembers, userProfiles,
-  onPin, onReply, onReact, onDelete, onEdit, onVote, onReveal, onForward 
+  onPin, onReply, onReact, onDelete, onEdit, onVote, onReveal, onForward, onReplyClick,
+  onStar, isStarred, searchTerm 
 }) {
   const [showReactionMenu, setShowReactionMenu] = useState(false);
+  
+  // --- ROLES & PERMISSIONS ---
   const isMe = msg.senderId === currentUser.uid;
   const isDeleted = msg.isDeleted;
   const myRole = userData?.role;
-  const canSeeDeletedContent = myRole === 'admin';
-  const showEditHistory = myRole === 'admin' && msg.editHistory && !isDeleted;
+  
+  // CRITICAL: Ensure Admin Role is detected correctly
+  const isAdmin = myRole === 'admin'; 
 
-  // Live Data lookup
   const senderLiveProfile = userProfiles ? userProfiles[msg.senderId] : null;
   const currentXP = isMe ? (userData?.xp || 0) : (senderLiveProfile?.xp || msg.senderXp || 0);
   const currentRole = isMe ? (userData?.role) : (senderLiveProfile?.role || msg.senderRole);
 
-  const handleDownload = (e) => {
+  const canDelete = isMe || isManager;
+  const canEdit = isMe && !isDeleted && msg.type === 'text';
+  // Admin sees edit history even if message is active
+  const showEditHistory = isAdmin && msg.editHistory; 
+
+  // --- HELPER: Highlight Search Text ---
+  const highlightText = (text, term) => {
+    if (!text) return "";
+    if (!term) return text;
+    const parts = String(text).split(new RegExp(`(${term})`, 'gi'));
+    return parts.map((part, i) => 
+      part.toLowerCase() === term.toLowerCase() 
+        ? <span key={i} className="bg-yellow-300 text-gray-900 px-0.5 rounded-[2px] shadow-sm">{part}</span> 
+        : part
+    );
+  };
+
+  // --- DOWNLOAD LOGIC ---
+  const handleDownload = async (e) => {
     e.stopPropagation();
-    if(msg.isUploading) return;
-    const url = msg.mediaUrl?.includes('cloudinary') 
-      ? msg.mediaUrl.replace('/upload/', '/upload/fl_attachment/') 
-      : msg.mediaUrl;
-    window.open(url, '_blank');
+    if (msg.isUploading) return;
+
+    if (msg.type === 'image' && !msg.fileName?.toLowerCase().endsWith('.pdf')) {
+        const url = msg.mediaUrl.replace('/upload/', '/upload/fl_attachment/');
+        window.open(url, '_blank');
+        return;
+    }
+
+    try {
+        const response = await fetch(msg.mediaUrl);
+        if (!response.ok) throw new Error("Network error");
+        const blob = await response.blob();
+        const blobUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = msg.fileName || "download";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+        window.open(msg.mediaUrl, '_blank');
+    }
   };
 
   const handleView = (e) => {
@@ -57,61 +96,120 @@ export default function MessageItem({
      return <CheckCheck size={15} className="text-blue-200/60" />;
   };
 
-  let canDelete = isManager || (isMe && (userData?.xp || 0) >= 100);
-  const canEdit = isMe && !isDeleted && msg.type === 'text'; 
   const reactions = ['👍', '👎', '❤️', '😂', '😮', '😢', '🔥'];
 
-  // Media Card Styles
-  // If it's me (Admin), use blue border but KEEP content neutral so images show up
-  const containerBorder = isMe ? "border-blue-200" : "border-gray-100";
-  const footerBg = isMe ? "bg-blue-600" : "bg-white";
-  const footerTextMain = isMe ? "text-white" : "text-gray-800";
-  const footerTextSub = isMe ? "text-blue-200" : "text-gray-500";
-  const footerIconBg = isMe ? "bg-white/20 text-white" : "bg-blue-50 text-blue-500";
+  // --- ACTIONS MENU ---
+  const renderActionsMenu = () => (
+    !isDeleted && !msg.isUploading && (
+        <div className={`absolute -top-8 ${isMe ? 'right-0' : 'left-0'} flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200 z-[60] bg-white/95 backdrop-blur shadow-md border border-gray-100 rounded-full px-2 py-1`}>
+            <button onClick={() => onStar(msg)} className="p-1.5 hover:scale-110 transition"><Star size={14} fill={isStarred ? "gold" : "none"} className={isStarred ? "text-yellow-500" : "text-gray-400"} /></button>
+            <button onClick={() => onForward(msg)} className="p-1.5 text-gray-400 hover:text-purple-500 transition"><Share size={14} /></button>
+            {canDelete && <button onClick={() => onDelete(msg)} className="p-1.5 text-gray-400 hover:text-red-500 transition"><Trash2 size={14} /></button>}
+            {canEdit && <button onClick={() => onEdit(msg)} className="p-1.5 text-gray-400 hover:text-green-500 transition"><Edit2 size={14} /></button>}
+            {isManager && <button onClick={() => onPin(msg)} className="p-1.5 text-gray-400 hover:text-yellow-500 transition"><Pin size={14} /></button>}
+            {msg.type !== 'poll' && <button onClick={() => onReply(msg)} className="p-1.5 text-gray-400 hover:text-blue-500 transition"><Reply size={14} /></button>}
+            <div className="w-px h-3 bg-gray-300 mx-1"></div>
+            <div className="relative">
+                <button onClick={() => setShowReactionMenu(!showReactionMenu)} className="p-1.5 text-gray-400 hover:text-orange-500 transition"><Smile size={14} /></button>
+                {showReactionMenu && (
+                    <div className="absolute top-8 left-0 bg-white shadow-xl rounded-full p-1 flex gap-1 z-50">
+                        {reactions.map(emoji => <button key={emoji} onClick={() => { onReact(msg.id, emoji); setShowReactionMenu(false); }} className="hover:bg-gray-100 p-1 rounded-full">{emoji}</button>)}
+                    </div>
+                )}
+            </div>
+        </div>
+    )
+  );
 
-  return (
-    <div className={`flex gap-3 mb-6 group ${isMe ? 'flex-row-reverse' : ''} relative`}>
-      
-      <div className="shrink-0">
-        <AnimeDP seed={msg.senderEmail || msg.senderId} role={currentRole} size={45} xp={currentXP} />
-      </div>
+  const renderReactions = () => (
+    !isDeleted && msg.reactions && (
+        <div className={`absolute -bottom-4 ${isMe ? 'right-0' : 'left-0'} flex gap-1 z-10`}>
+            {Object.entries(msg.reactions).map(([emoji, users]) => (
+                <div key={emoji} className="bg-white/90 border border-gray-100 rounded-full px-1.5 py-0.5 text-[10px] shadow-sm flex gap-1">
+                    <span>{emoji}</span><span className="font-bold text-gray-500">{Object.keys(users).length}</span>
+                </div>
+            ))}
+        </div>
+    )
+  );
 
-      <div className="max-w-[80%] md:max-w-[60%] relative">
+  // --- REUSABLE: DELETED MESSAGE BUBBLE ---
+  const renderDeletedBubble = (originalContent = null) => (
+    <div className="flex flex-col">
+        <p className="text-xs flex items-center gap-1 text-gray-500 italic">
+            <Trash2 size={12} /> {msg.deletedByRole === 'admin' ? "Deleted by Admin" : "Message deleted"}
+        </p>
         
-        {/* === CONTENT SWITCHER === */}
-        {msg.type === 'poll' ? (
-          <PollMessage msg={msg} currentUser={currentUser} onVote={onVote} onReveal={onReveal} />
-        ) : msg.type === 'audio' ? (
-          <VoiceMessage msg={msg} isMe={isMe} nameTextColor={getRoleTextColor(currentRole)} canSeeDeletedContent={canSeeDeletedContent} />
-        ) : (msg.type === 'image' || msg.type === 'video' || msg.type === 'file') ? (
-            
-           // === MEDIA & FILE CARD ===
+        {/* If Admin and Original Content exists, show it */}
+        {isAdmin && originalContent && (
+            <div className="mt-2 pt-2 border-t border-red-100 text-left">
+                <p className="text-[10px] font-bold text-red-500 mb-0.5 uppercase tracking-wide">Admin View:</p>
+                {originalContent}
+            </div>
+        )}
+    </div>
+  );
+
+  // --- CORE RENDER LOGIC (Separated for stability) ---
+  const renderMessageContent = () => {
+    
+    // 1. POLL (Always Visible)
+  // 1. POLL
+    if (msg.type === 'poll') {
+        // If deleted, show the deleted bubble, NOT the poll
+        if (isDeleted) {
+            return renderDeletedBubble();
+        }
+        return <PollMessage msg={msg} currentUser={currentUser} onVote={onVote} onReveal={onReveal} />;
+    }
+
+    // 2. AUDIO (Admin Sees Deleted)
+    if (msg.type === 'audio') {
+        if (isDeleted) {
+            // ADMIN gets to see deleted Audio
+            if (isAdmin) {
+                return renderDeletedBubble(
+                    <div className="opacity-70 scale-95 origin-left">
+                        <VoiceMessage msg={msg} isMe={isMe} nameTextColor={getRoleTextColor(currentRole)} canSeeDeletedContent={true} />
+                    </div>
+                );
+            }
+            // User sees plain deleted bubble
+            return renderDeletedBubble();
+        }
+        // Not deleted
+        return <VoiceMessage msg={msg} isMe={isMe} nameTextColor={getRoleTextColor(currentRole)} canSeeDeletedContent={false} />;
+    }
+
+    // 3. MEDIA (Image / Video / File)
+    if (['image', 'video', 'file'].includes(msg.type)) {
+        // If deleted, HIDE for everyone (Including Admin). 
+        // Admin DOES NOT see the file.
+        if (isDeleted) {
+            return renderDeletedBubble(null); // Passing null ensures no content is shown
+        }
+
+        const containerBorder = isMe ? "border-blue-200" : "border-gray-100";
+        const footerBg = isMe ? "bg-blue-600" : "bg-white";
+        const footerTextMain = isMe ? "text-white" : "text-gray-800";
+        const footerTextSub = isMe ? "text-blue-200" : "text-gray-500";
+        const footerIconBg = isMe ? "bg-white/20 text-white" : "bg-blue-50 text-blue-500";
+
+        return (
            <div className={`relative rounded-2xl overflow-hidden shadow-sm border ${containerBorder} bg-gray-50`}>
-              
-              {/* Username Display (Visible to everyone except me) */}
-              {!isMe && !isDeleted && (
+              {!isMe && (
                 <div className="px-3 pt-2 pb-1 bg-white border-b border-gray-100">
                     <p className={`text-[11px] font-bold ${getRoleTextColor(currentRole)}`}>{displayName}</p>
                 </div>
               )}
 
-              {/* Preview Area (Images/Videos) */}
               {(msg.type === 'image' || msg.type === 'video') && (
                   <div className="relative bg-gray-100 flex items-center justify-center min-h-[120px]">
                     {msg.isUploading ? (
-                        <div className="flex flex-col items-center justify-center text-gray-400 gap-2 p-8">
-                            <Loader2 size={24} className="animate-spin text-blue-500" />
-                            <span className="text-xs font-medium">Uploading...</span>
-                        </div>
+                        <div className="flex flex-col items-center justify-center text-gray-400 gap-2 p-8"><Loader2 size={24} className="animate-spin text-blue-500" /><span className="text-xs font-medium">Uploading...</span></div>
                     ) : (
                         <>
-                            {msg.type === 'image' ? (
-                                <img src={msg.mediaUrl} alt="shared" className="w-full h-auto max-h-[200px] object-cover" />
-                            ) : (
-                                <video controls src={msg.mediaUrl} className="w-full h-auto max-h-[200px]" />
-                            )}
-                            
-                            {/* Overlay Buttons */}
+                            {msg.type === 'image' ? <img src={msg.mediaUrl} alt="shared" className="w-full h-auto max-h-[200px] object-cover" /> : <video controls src={msg.mediaUrl} className="w-full h-auto max-h-[200px]" />}
                             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
                                 <button onClick={handleView} className="p-2 bg-white/20 hover:bg-white/40 rounded-full text-white backdrop-blur-sm transition"><Eye size={20} /></button>
                                 <button onClick={handleDownload} className="p-2 bg-white/20 hover:bg-white/40 rounded-full text-white backdrop-blur-sm transition"><Download size={20} /></button>
@@ -121,108 +219,87 @@ export default function MessageItem({
                   </div>
               )}
 
-              {/* File Info Footer */}
               <div className={`p-3 flex items-center gap-3 ${footerBg}`}>
                   <div className={`p-2 rounded-lg shrink-0 ${footerIconBg}`}>
                      {msg.isUploading ? <Loader2 size={20} className="animate-spin" /> : (msg.type === 'image' ? <FileText size={20} /> : msg.type === 'video' ? <Play size={20} /> : <File size={20} />)}
                   </div>
-                  
                   <div className="flex-1 overflow-hidden min-w-0">
-                      <p className={`text-xs font-bold truncate ${footerTextMain}`}>{msg.fileName || "File"}</p>
+                      <p className={`text-xs font-bold truncate max-w-[200px] ${footerTextMain}`}>{highlightText(msg.fileName, searchTerm) || "File"}</p>
                       <p className={`text-[10px] ${footerTextSub}`}>{msg.fileSize || (msg.isUploading ? "Processing..." : "")}</p>
                   </div>
-                  
-                  {/* Download Button for Generic Files */}
                   {!msg.isUploading && msg.type === 'file' && (
-                     <button onClick={handleDownload} className={`p-2 rounded-full ${isMe ? 'text-white hover:bg-white/20' : 'text-gray-500 hover:bg-gray-100'}`}>
-                        <Download size={18} />
-                     </button>
+                     <button onClick={handleDownload} className={`p-2 rounded-full ${isMe ? 'text-white hover:bg-white/20' : 'text-gray-500 hover:bg-gray-100'}`}><Download size={18} /></button>
                   )}
-
-                  {/* Time & Status */}
                   <div className="flex flex-col items-end shrink-0 pl-2">
-                      <span className={`text-[9px] ${footerTextSub}`}>{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      <span className={`text-[9px] ${footerTextSub} flex items-center gap-1`}>
+                        {isStarred && <Star size={10} fill="currentColor" className="text-yellow-400" />}
+                        {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
                       {isMe && !msg.isUploading && <div className="mt-0.5">{getStatusIcon()}</div>}
                   </div>
               </div>
            </div>
+        );
+    }
 
-        ) : (
-          
-          // === TEXT MESSAGE ===
-          <>
+    // 4. TEXT (Default)
+    if (isDeleted) {
+        // ADMIN gets to see deleted Text
+        if (isAdmin) {
+            return renderDeletedBubble(
+                <div className="text-sm text-red-600 font-medium">{msg.text || "[No Text Data]"}</div>
+            );
+        }
+        return renderDeletedBubble();
+    }
+
+    // Normal Text Render
+    return (
+        <div className="flex flex-col">
+            <p className="text-sm leading-relaxed">{highlightText(msg.text, searchTerm)}</p>
+            <div className={`flex items-center gap-1 mt-1 ${isMe ? 'justify-end' : 'justify-start'} opacity-90`}>
+                {msg.isEdited && <span className="text-[9px] mr-1 opacity-70">(edited)</span>}
+                {isStarred && <Star size={10} fill="currentColor" className="text-yellow-300 mr-1" />}
+                <span className="text-[9px] opacity-70">{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                {isMe && <div className="ml-1 translate-y-[1px]">{getStatusIcon()}</div>}
+            </div>
+            {showEditHistory && (
+                <div className="mt-3 pt-2 border-t border-black/10 text-left">
+                    <p className="text-[9px] font-bold text-gray-500 mb-1">Edit History (Admin):</p>
+                    {Object.entries(msg.editHistory).map(([ts, t]) => <div key={ts} className="text-[9px] text-gray-400 line-through">{t}</div>)}
+                </div>
+            )}
+        </div>
+    );
+  };
+
+  return (
+    <div id={msg.id} className={`flex gap-3 mb-6 group ${isMe ? 'flex-row-reverse' : ''} relative scroll-mt-32`}>
+      <div className="shrink-0"><AnimeDP seed={msg.senderEmail || msg.senderId} role={currentRole} size={45} xp={currentXP} /></div>
+
+      <div className="max-w-[80%] md:max-w-[60%] relative">
+        <div className="relative">
             {msg.replyTo && !isDeleted && (
-              <div className={`text-xs mb-1 p-2 rounded-lg border-l-4 bg-white/50 border-gray-400 text-gray-500 opacity-80 ${isMe ? 'text-right' : 'text-left'}`}>
+              <div onClick={() => onReplyClick && onReplyClick(msg.replyTo.id)} className={`text-xs mb-1 p-2 rounded-lg border-l-4 bg-white/50 border-gray-400 text-gray-500 opacity-80 cursor-pointer hover:bg-white/80 transition ${isMe ? 'text-right' : 'text-left'}`}>
                 <span className="font-bold block mb-0.5">{isFirstLevelRater && !isManager && !isMe ? "Member/Admin" : msg.replyTo.sender}</span>
                 <span className="italic truncate block">{msg.replyTo.text}</span>
               </div>
             )}
 
-            <div className={`relative p-4 shadow-sm break-words ${isDeleted ? 'bg-gray-100 border border-gray-200 text-gray-400 rounded-2xl italic' : isMe ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm' : 'bg-white text-gray-800 rounded-2xl rounded-tl-sm'}`}>
-              {!isMe && !isDeleted && (
-                <p className={`text-[11px] mb-1 font-bold ${getRoleTextColor(currentRole)}`}>{displayName}</p>
-              )}
-
-              {isDeleted ? (
-                <div>
-                   <p className="text-xs flex items-center gap-1"><Trash2 size={12} /> {msg.deletedByRole === 'admin' ? "Deleted by Admin" : "Message deleted"}</p>
-                   {canSeeDeletedContent && <div className="mt-2 text-red-500 text-xs">(Admin): {msg.text}</div>}
+            {/* Render Content */}
+            {/* If it's a media card (and not deleted), render directly. Otherwise wrap in bubble. */}
+            {(['image', 'video', 'file'].includes(msg.type) && !isDeleted) ? (
+                renderMessageContent()
+            ) : (
+                <div className={`relative p-4 shadow-sm break-words ${isDeleted ? 'bg-gray-100 border border-gray-200 text-gray-400 rounded-2xl italic' : isMe ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm' : 'bg-white text-gray-800 rounded-2xl rounded-tl-sm'}`}>
+                    {!isMe && !isDeleted && <p className={`text-[11px] mb-1 font-bold ${getRoleTextColor(currentRole)}`}>{displayName}</p>}
+                    {renderMessageContent()}
                 </div>
-              ) : (
-                <div className="flex flex-col">
-                  <p className="text-sm leading-relaxed">{msg.text}</p>
-                  <div className={`flex items-center gap-1 mt-1 ${isMe ? 'justify-end' : 'justify-start'} opacity-90`}>
-                      {msg.isEdited && <span className="text-[9px] mr-1 opacity-70">(edited)</span>}
-                      <span className="text-[9px] opacity-70">{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                      {isMe && <div className="ml-1 translate-y-[1px]">{getStatusIcon()}</div>}
-                  </div>
-                  {showEditHistory && (
-                    <div className="mt-3 pt-2 border-t border-black/10 text-left">
-                       <p className="text-[9px] font-bold text-gray-500 mb-1">Edit History:</p>
-                       {Object.entries(msg.editHistory).map(([ts, t]) => <div key={ts} className="text-[9px] text-gray-400 line-through">{t}</div>)}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {/* --- ACTIONS MENU (FIXED POSITION) --- */}
-        {!isDeleted && !msg.isUploading && (
-            <div className={`absolute -top-8 ${isMe ? 'right-0' : 'left-0'} flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200 z-50 bg-white/90 backdrop-blur shadow-sm border border-gray-100 rounded-full px-2 py-1`}>
-              <button onClick={() => onForward(msg)} className="p-1.5 text-gray-400 hover:text-purple-500 hover:scale-110 transition"><Share size={14} /></button>
-              {canDelete && <button onClick={() => onDelete(msg)} className="p-1.5 text-gray-400 hover:text-red-500 hover:scale-110 transition"><Trash2 size={14} /></button>}
-              {canEdit && <button onClick={() => onEdit(msg)} className="p-1.5 text-gray-400 hover:text-green-500 hover:scale-110 transition"><Edit2 size={14} /></button>}
-              {isManager && <button onClick={() => onPin(msg)} className="p-1.5 text-gray-400 hover:text-yellow-500 hover:scale-110 transition"><Pin size={14} /></button>}
-              {msg.type !== 'poll' && <button onClick={() => onReply(msg)} className="p-1.5 text-gray-400 hover:text-blue-500 hover:scale-110 transition"><Reply size={14} /></button>}
-              
-              <div className="w-px h-3 bg-gray-300 mx-1"></div>
-              
-              <div className="relative">
-                <button onClick={() => setShowReactionMenu(!showReactionMenu)} className="p-1.5 text-gray-400 hover:text-orange-500 hover:scale-110 transition"><Smile size={14} /></button>
-                {showReactionMenu && (
-                  <div className="absolute top-8 left-0 bg-white shadow-xl rounded-full p-1 flex gap-1 border border-gray-100 z-50 animate-in zoom-in-50 duration-200">
-                    {reactions.map(emoji => (
-                      <button key={emoji} onClick={() => { onReact(msg.id, emoji); setShowReactionMenu(false); }} className="w-8 h-8 hover:bg-gray-100 rounded-full flex items-center justify-center text-lg transition">{emoji}</button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-        )}
-
-        {/* --- REACTIONS DISPLAY --- */}
-        {!isDeleted && msg.reactions && (
-           <div className={`absolute -bottom-4 ${isMe ? 'right-0' : 'left-0'} flex gap-1 z-10`}>
-             {Object.entries(msg.reactions).map(([emoji, users]) => (
-               <div key={emoji} className="bg-white/90 backdrop-blur border border-gray-100 rounded-full px-1.5 py-0.5 text-[10px] shadow-sm flex items-center gap-1 scale-90">
-                 <span>{emoji}</span><span className="font-bold text-gray-500">{Object.keys(users).length}</span>
-               </div>
-             ))}
-           </div>
-        )}
-
+            )}
+            
+            {renderActionsMenu()}
+            {!isDeleted && renderReactions()}
+        </div>
       </div>
     </div>
   );

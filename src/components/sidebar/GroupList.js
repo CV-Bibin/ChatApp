@@ -1,74 +1,87 @@
 import React from 'react';
-import { Users, UserPlus } from 'lucide-react';
+import { Hash, UserPlus } from 'lucide-react';
 
 export default function GroupList({ 
   groups, 
-  canSeeAllGroups, 
-  canManageGroups, 
   onSelectGroup, 
-  onAddMemberClick,
-  userStatuses // New Prop
+  userStatuses, // <--- Used to calculate online count
+  unreadCounts, 
+  onAddMemberClick, 
+  canManageGroups,  
+  activeGroupId
 }) {
+  if (groups.length === 0) return null;
+
   return (
-    <div>
-      <h4 className="text-xs font-bold text-gray-400 mb-3 px-2 uppercase tracking-wide">
-        {canSeeAllGroups ? "All Groups" : "Your Groups"}
-      </h4>
-      
-      {groups.length === 0 && (
-        <p className="text-xs text-gray-400 px-2 italic">No groups found.</p>
-      )}
+    <div className="mb-6">
+      <div className="flex items-center gap-2 px-4 mb-2 mt-2">
+        <Hash size={13} className="text-gray-400" />
+        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Your Groups</h3>
+      </div>
 
-      {groups.map((group) => {
-        const safeGroupName = group.name || "Unnamed Group"; 
-        
-        // --- CALCULATE ONLINE COUNT ---
-        // 1. Get list of member IDs
-        const memberIds = group.members ? Object.keys(group.members) : [];
-        // 2. Count how many have state === 'online' in userStatuses
-        const onlineCount = memberIds.filter(uid => userStatuses[uid]?.state === 'online').length;
+      <div className="space-y-1 px-2">
+        {groups.map(group => {
+          const unread = unreadCounts[group.id] || 0;
+          const isActive = activeGroupId === group.id;
 
-        return (
-          <div key={group.id} className="group flex items-center gap-2 mb-2">
+          // --- CALCULATE STATS ---
+          const memberIds = group.members ? Object.keys(group.members) : [];
+          const totalCount = memberIds.length;
+          const onlineCount = memberIds.filter(uid => userStatuses[uid]?.state === 'online').length;
+
+          return (
             <div 
-              onClick={() => onSelectGroup({ ...group, name: safeGroupName })} 
-              className="flex-1 flex items-center gap-3 p-3 rounded-xl hover:bg-blue-50 cursor-pointer transition border border-transparent hover:border-blue-100"
+              key={group.id}
+              onClick={() => onSelectGroup(group)}
+              className={`group/item p-3 rounded-xl cursor-pointer transition-all duration-200 flex items-center justify-between 
+                ${isActive ? 'bg-blue-50 ring-1 ring-blue-200 shadow-sm' : 'hover:bg-gray-50 border border-transparent'}`}
             >
-              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold">
-                <Users size={18} />
-              </div>
-              <div className="overflow-hidden">
-                <h4 className="font-bold text-sm text-gray-800 truncate">{safeGroupName}</h4>
+              <div className="flex items-center gap-3 overflow-hidden flex-1">
+                {/* Group Avatar */}
+                <div className={`w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-xs font-bold shadow-sm transition-colors
+                  ${isActive ? 'bg-blue-500 text-white' : 'bg-white border border-gray-100 text-gray-600 group-hover/item:border-blue-200'}`}>
+                  {group.name.substring(0, 2).toUpperCase()}
+                </div>
                 
-                <div className="flex items-center gap-2">
-                  {/* Total Members Count */}
-                  {canManageGroups && (
-                    <p className="text-[10px] text-gray-400 truncate">
-                      {memberIds.length} members
-                    </p>
-                  )}
+                {/* Group Info */}
+                <div className="flex flex-col overflow-hidden">
+                  <span className={`text-sm font-bold truncate ${isActive ? 'text-blue-900' : 'text-gray-700'}`}>
+                    {group.name}
+                  </span>
                   
-                  {/* NEW: Online Count (Visible to EVERYONE) */}
-                  {onlineCount > 0 && (
-                    <p className="text-[10px] font-bold text-green-500 flex items-center gap-1">
-                      ● {onlineCount} active
-                    </p>
-                  )}
+                  {/* --- CHANGED: SHOW COUNTS INSTEAD OF DESCRIPTION --- */}
+                  <span className="text-[10px] text-gray-400 truncate font-medium">
+                    <span className="text-green-600">{onlineCount} Online</span> • {totalCount} Members
+                  </span>
                 </div>
               </div>
+
+              {/* --- RIGHT SIDE ACTIONS --- */}
+              <div className="flex items-center gap-2 shrink-0">
+                
+                {/* Add Member Button (Only on Hover & if Admin) */}
+                {canManageGroups && (
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); onAddMemberClick(group); }}
+                    className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-100 rounded-full transition opacity-0 group-hover/item:opacity-100"
+                    title="Add Member"
+                  >
+                    <UserPlus size={16} />
+                  </button>
+                )}
+
+                {/* Notification Bubble */}
+                {unread > 0 && (
+                  <div className="bg-red-500 text-white text-[10px] font-bold h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full shadow-md animate-in zoom-in">
+                    {unread}
+                  </div>
+                )}
+              </div>
+
             </div>
-            
-            {canManageGroups && (
-              <button 
-                onClick={() => onAddMemberClick({ ...group, name: safeGroupName })}
-                className="p-2 text-gray-300 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
-              >
-                <UserPlus size={16} />
-              </button>
-            )}
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }

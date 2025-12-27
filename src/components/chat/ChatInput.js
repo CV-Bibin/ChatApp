@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Lock, X, Edit2, BarChart2, Mic } from 'lucide-react';
+import { Send, Lock, X, Edit2, BarChart2, Mic, Plus } from 'lucide-react';
 import { database, auth } from '../../firebase';
 import { ref, update } from 'firebase/database';
-import MediaUpload from './MediaUpload'; // <--- Import the new component
+import AttachmentMenu from './AttachmentMenu'; // <--- NEW IMPORT
 
 export default function ChatInput({ 
     onSendMessage, isRestricted, isManager, 
@@ -11,31 +11,27 @@ export default function ChatInput({
     editingMessage, onCancelEdit,
     onOpenPoll,
     onSendAudio,
-    onUploadFile, // Passed from parent
-    isUploading,  // Passed from parent
+    onUploadFile, // This now expects (file, category)
     userXP = 0 
 }) {
   const [newMessage, setNewMessage] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [showMenu, setShowMenu] = useState(false); // <--- MENU STATE
   
-  // Ref for Audio only (File ref moved to MediaUpload.js)
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const streamRef = useRef(null);
 
-  // --- 1. POLL RESTRICTION LOGIC ---
   const canCreatePoll = isManager || userXP >= 500; 
 
-  // --- 2. REPLY NAME MASKING ---
   const getReplyDisplayName = () => {
     if (!replyTo) return "";
     if (isManager || userXP >= 100) return replyTo.senderEmail?.split('@')[0];
     const role = replyTo.senderRole;
     if (role === 'admin') return "Admin";
     if (role === 'co_admin' || role === 'assistant_admin') return "Task Expert";
-    if (role === 'leader' || role === 'group_leader') return replyTo.senderEmail?.split('@')[0]; 
-    return "Member"; 
+    return replyTo.senderEmail?.split('@')[0] || "Member";
   };
 
   useEffect(() => {
@@ -85,7 +81,6 @@ export default function ChatInput({
       setIsRecording(true);
     } catch (err) {
       console.error("Mic Error:", err);
-      alert("Microphone access denied.");
     }
   };
 
@@ -117,10 +112,17 @@ export default function ChatInput({
   const canType = !isRestricted || isManager;
 
   return (
-    <div className="absolute bottom-0 w-full z-30 p-6 bg-gradient-to-t from-[#f8fafc] via-[#f8fafc] to-transparent">
+    <div className="w-full z-30 p-4 bg-[#f0f2f5] border-t border-gray-200 relative">
       
+      {/* --- ATTACHMENT MENU --- */}
+      <AttachmentMenu 
+        isOpen={showMenu} 
+        onClose={() => setShowMenu(false)} 
+        onSelect={onUploadFile} // Pass the handler
+      />
+
       {replyTo && (
-        <div className="flex justify-between items-center bg-white/90 backdrop-blur p-3 rounded-t-2xl border border-b-0 border-gray-200 mx-4 shadow-sm">
+        <div className="flex justify-between items-center bg-white p-3 rounded-t-2xl border border-b-0 border-gray-200 shadow-sm mb-[-1px] mx-2">
           <div className="text-xs text-gray-600 border-l-2 border-blue-500 pl-2">
             <span className="font-bold text-blue-600 block">Replying to {getReplyDisplayName()}</span>
             <span className="truncate block max-w-xs opacity-75">{replyTo.text}</span>
@@ -130,7 +132,7 @@ export default function ChatInput({
       )}
 
       {editingMessage && (
-        <div className="flex justify-between items-center bg-green-50/90 backdrop-blur p-3 rounded-t-2xl border border-b-0 border-green-200 mx-4 shadow-sm">
+        <div className="flex justify-between items-center bg-green-50 p-3 rounded-t-2xl border border-b-0 border-green-200 shadow-sm mb-[-1px] mx-2">
           <div className="text-xs text-green-700 flex items-center gap-2">
             <Edit2 size={14}/> <span className="font-bold">Editing Message...</span>
           </div>
@@ -139,21 +141,24 @@ export default function ChatInput({
       )}
 
       {canType ? (
-        <form onSubmit={handleSubmit} className={`bg-white shadow-xl border border-gray-100 rounded-full p-2 flex items-center gap-2 transition-all focus-within:ring-2 focus-within:ring-blue-100 ${replyTo || editingMessage ? 'rounded-t-none rounded-b-3xl mx-4' : ''}`}>
+        <form onSubmit={handleSubmit} className={`bg-white shadow-sm border border-gray-200 rounded-2xl p-2 flex items-center gap-2 transition-all focus-within:ring-2 focus-within:ring-blue-100 ${replyTo || editingMessage ? 'rounded-t-none' : ''}`}>
           
           {!isRecording && (
             <>
+                {/* --- PLUS BUTTON (Toggles Menu) --- */}
+                <button 
+                    type="button" 
+                    onClick={() => setShowMenu(!showMenu)} 
+                    className={`p-2 rounded-full transition ${showMenu ? 'bg-blue-100 text-blue-600 rotate-45' : 'text-gray-400 hover:text-blue-500 hover:bg-blue-50'}`}
+                >
+                    <Plus size={24} />
+                </button>
+
                 {canCreatePoll && (
-                    <button type="button" onClick={onOpenPoll} className="p-3 text-gray-400 hover:text-purple-500 hover:bg-purple-50 rounded-full transition" title="Create Poll">
+                    <button type="button" onClick={onOpenPoll} className="p-2 text-gray-400 hover:text-purple-500 hover:bg-purple-50 rounded-full transition" title="Create Poll">
                         <BarChart2 size={20} />
                     </button>
                 )}
-                
-                {/* --- USE NEW MEDIA UPLOAD COMPONENT --- */}
-                <MediaUpload 
-                    onUpload={onUploadFile} 
-                    isUploading={isUploading} 
-                />
             </>
           )}
           
@@ -169,27 +174,26 @@ export default function ChatInput({
              </div>
           ) : (
              <input 
-                className="flex-1 bg-transparent border-none outline-none text-sm text-gray-700 placeholder-gray-400 disabled:opacity-50"
-                placeholder={isUploading ? "Uploading media..." : (editingMessage ? "Update..." : "Type a message...")}
+                className="flex-1 bg-transparent border-none outline-none text-sm text-gray-700 placeholder-gray-400"
+                placeholder={editingMessage ? "Update..." : "Type a message..."}
                 value={newMessage}
                 onChange={handleTyping}
-                //disabled={isUploading}
              />
           )}
           
           {newMessage.trim() || editingMessage ? (
-             <button type="submit" disabled={isUploading} className="p-3 text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 rounded-full transition shadow-md">
+             <button type="submit" className="p-3 text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 rounded-full transition shadow-md">
                 {editingMessage ? <Edit2 size={18} /> : <Send size={18} />}
              </button>
           ) : (
-             <button type="button" onClick={isRecording ? stopRecording : startRecording} disabled={isUploading} className={`p-3 rounded-full transition shadow-md ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+             <button type="button" onClick={isRecording ? stopRecording : startRecording} className={`p-3 rounded-full transition shadow-md ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
                 {isRecording ? <Send size={18} fill="currentColor" /> : <Mic size={20} />}
              </button>
           )}
         </form>
       ) : (
-        <div className="bg-red-50/90 backdrop-blur border border-red-100 rounded-2xl p-4 flex items-center justify-center gap-2 text-red-500 shadow-lg">
-          <Lock size={16} /> <span className="text-sm font-bold">Only Admins can send messages here.</span>
+        <div className="bg-red-50/90 backdrop-blur border border-red-100 rounded-2xl p-4 flex items-center justify-center gap-2 text-red-500 shadow-sm">
+          <Lock size={16} /> <span className="text-sm font-bold">Only Admins can send messages.</span>
         </div>
       )}
     </div>
